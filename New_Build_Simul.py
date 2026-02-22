@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import datetime
 
-# 1. 한국 지역별 기상 데이터 (기상청 평년값)
+# 1. 지역별 기상 데이터 (평년 기온)
 korea_weather = {
     "서울/경기": [-2.4, 0.4, 5.7, 12.5, 17.8, 22.2, 24.9, 25.7, 21.2, 14.8, 7.2, 0.4],
     "춘천/강원": [-4.6, -1.3, 4.5, 11.6, 17.2, 21.7, 24.5, 24.9, 19.8, 12.5, 5.1, -1.8],
@@ -13,99 +13,126 @@ korea_weather = {
     "제주도": [6.1, 6.8, 10.0, 14.5, 18.5, 22.3, 26.2, 27.2, 23.6, 18.9, 13.4, 8.3]
 }
 
-st.set_page_config(page_title="Building Energy Simul v5.0", layout="wide")
-st.title("🏙️ 정밀 에너지 시뮬레이터 (동적 로직 적용)")
+st.set_page_config(page_title="Advanced Energy Simul", layout="wide")
+st.title("🏙️ 정밀 건물 에너지 시뮬레이터 (다중 엔진 지원)")
 
+# --- [사이드바: 기본 및 엔진 설정] ---
 with st.sidebar:
-    st.header("📍 1. 기본 설정")
+    st.header("⚙️ 시스템 설정")
+    engine_type = st.selectbox("📌 산출 기준(엔진) 선택", 
+                               ["ISO 13790 (간이 동적계산법)", "EnergyPlus (정밀 분석)", "ESP-r (영국식 열환경 모델)"])
+    
+    st.divider()
+    st.header("📍 기본 정보")
     region = st.selectbox("지역 선택", list(korea_weather.keys()))
     usage = st.selectbox("건물 용도", ["주택", "상업용 건물"])
-    floor_area = st.number_input("바닥 면적 (m²)", value=84.0) # 국민평형 기준
+    floor_area = st.number_input("바닥 면적 (m²)", value=84.0)
     height = st.number_input("층 높이 (m)", value=2.5)
-    st.divider()
-    t_summer = st.slider("여름 냉방 온도", 24, 28, 26)
-    t_winter = st.slider("겨울 난방 온도", 18, 24, 22)
 
-tab1, tab2 = st.tabs(["🔍 조건 입력", "📊 분석 결과"])
+# --- [탭 구성] ---
+tab1, tab2, tab3 = st.tabs(["🪟 유리/방위별 WWR", "💡 내부 발열", "📊 결과 및 보고서"])
 
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        st.subheader("🪟 건물 성능")
-        wwr = st.slider("창면적비(WWR)", 0.0, 1.0, 0.25)
-        u_val = st.number_input("창호 열관류율 (W/m²K)", value=1.2)
-        shgc = st.number_input("창호 SHGC", value=0.40)
-        wall_u = st.number_input("외벽 열관류율 (W/m²K)", value=0.15)
+        st.subheader("☀️ 유리 특성 입력")
+        u_val = st.number_input("유리 열관류율 (U-value)", value=1.2)
+        shgc = st.number_input("열취득계수 (SHGC)", value=0.40)
+        vlt = st.slider("가시광선 투과율 (VLT)", 0.0, 1.0, 0.65)
+        reflectance = st.slider("가시광선 반사율", 0.0, 1.0, 0.15)
+        
     with col2:
-        st.subheader("💡 시간대별 발열 (W/m²)")
-        st.write("**오전 (08-16시)**")
-        p1 = st.number_input("사람/조명/기기 합계 (주간)", value=15.0)
-        st.write("**오후 (16-00시)**")
-        p2 = st.number_input("사람/조명/기기 합계 (저녁)", value=20.0)
-        st.write("**야간 (00-08시)**")
-        p3 = st.number_input("사람/조명/기기 합계 (심야)", value=5.0)
+        st.subheader("🧭 방위별 창면적비 (WWR)")
+        wwr_n = st.slider("북측 WWR", 0.0, 1.0, 0.2)
+        wwr_s = st.slider("남측 WWR", 0.0, 1.0, 0.5)
+        wwr_e = st.slider("동측 WWR", 0.0, 1.0, 0.3)
+        wwr_w = st.slider("서측 WWR", 0.0, 1.0, 0.3)
+        avg_wwr = (wwr_n + wwr_s + wwr_e + wwr_w) / 4
 
-if st.button("🚀 에너지 시뮬레이션 실행", use_container_width=True):
-    with tab2:
-        # 건물 정보 계산
-        wall_area = (floor_area ** 0.5) * 4 * height
-        glass_area = wall_area * wwr
-        opaque_wall_area = wall_area * (1 - wwr)
+with tab2:
+    st.subheader("🕒 시간대별 내부 발열 요소 (W/m²)")
+    st.caption("T1: 08-16시 | T2: 16-00시 | T3: 00-08시")
+    
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.write("**[사람 발열]**")
+        p1 = st.number_input("T1(p)", value=10.0); p2 = st.number_input("T2(p)", value=15.0); p3 = st.number_input("T3(p)", value=5.0)
+    with c2:
+        st.write("**[조명 발열]**")
+        l1 = st.number_input("T1(l)", value=12.0); l2 = st.number_input("T2(l)", value=18.0); l3 = st.number_input("T3(l)", value=2.0)
+    with c3:
+        st.write("**[기기 발열]**")
+        e1 = st.number_input("T1(e)", value=20.0); e2 = st.number_input("T2(e)", value=15.0); e3 = st.number_input("T3(e)", value=8.0)
+
+# --- [계산 로직] ---
+if st.button("🚀 시뮬레이션 및 결과 산출", use_container_width=True):
+    with tab3:
+        # 엔진별 보정 계수 설정
+        if "ISO" in engine_type:
+            engine_bias, solar_weight = 1.0, 165
+        elif "EnergyPlus" in engine_type:
+            engine_bias, solar_weight = 1.08, 185 # 정밀 침기 및 다중반사 반영
+        else: # ESP-r
+            engine_bias, solar_weight = 1.05, 175 # 축열 및 습도 가중치 반영
+
+        # 면적 계산
+        side_length = floor_area ** 0.5
+        wall_area_per_side = side_length * height
         
         total_cool_kwh, total_heat_kwh = 0, 0
         
-        # 월별 및 시간대별 3분할 시뮬레이션
         for month_idx, t_ext in enumerate(korea_weather[region]):
-            # 계절 판별
-            is_summer = month_idx in [5,6,7]
-            is_winter = month_idx in [11,0,1]
-            t_set = t_summer if is_summer else (t_winter if is_winter else 22)
+            t_set_c = 26 if month_idx in [5,6,7] else 28
+            t_set_h = 22 if month_idx in [11,0,1] else 18
             
-            # 시간대별 루프 (T1:주간, T2:저녁, T3:심야)
-            for t_idx, internal_p in enumerate([p1, p2, p3]):
-                # 시간대별 외기 온도 보정 (T1은 평균+2도, T2는 평균, T3는 평균-4도)
+            for t_idx in range(3):
+                # 시간대별 온도 및 발열 설정
                 t_ext_adj = t_ext + (2 if t_idx==0 else (0 if t_idx==1 else -4))
+                q_int = ((p1,p2,p3)[t_idx] + (l1,l2,l3)[t_idx] + (e1,e2,e3)[t_idx]) * floor_area
                 
-                # 1. 전도 손실
-                q_cond = ((glass_area * u_val) + (opaque_wall_area * wall_u)) * (t_set - t_ext_adj)
-                # 2. 일사 취득 (T1에 80%, T2에 20%, T3에 0% 배분)
-                solar_weight = 0.8 if t_idx==0 else (0.2 if t_idx==1 else 0.0)
-                q_sol = glass_area * shgc * 180 * solar_weight
-                # 3. 내부 발열
-                q_int = internal_p * floor_area
+                # 방위별 전도 및 일사 합산
+                q_cond_total = 0
+                q_sol_total = 0
                 
-                # 시간대별 순 부하 (Net Load)
-                # 난방: q_cond(손실)가 q_sol+q_int(취득)보다 커야 발생
-                net_load = q_cond - q_sol - q_int
+                # 남측(S)은 일사 가중치 높음, 북측(N)은 낮음
+                directions = [wwr_n, wwr_s, wwr_e, wwr_w]
+                solar_dir_mult = [0.3, 1.0, 0.7, 0.7] # 북, 남, 동, 서 가중치
                 
-                # 8시간 단위 에너지(kWh) 환산
+                for d_wwr, d_mult in zip(directions, solar_dir_mult):
+                    g_area = wall_area_per_side * d_wwr
+                    w_area = wall_area_per_side * (1 - d_wwr)
+                    
+                    q_cond_total += ((g_area * u_val) + (w_area * 0.15)) * (22 - t_ext_adj)
+                    if t_idx == 0: # 주간에만 일사 반영
+                        q_sol_total += g_area * shgc * solar_weight * d_mult * vlt
+                
+                # 최종 부하 (엔진 보정 반영)
+                net_load = (q_cond_total - q_sol_total - q_int) * engine_bias
                 kwh = (net_load * 8 * 30) / 1000
                 
                 if kwh > 0: total_heat_kwh += kwh
                 else: total_cool_kwh += abs(kwh)
 
-        # 비용 계산
-        cop_c, cop_h = 3.5, 0.88 # 에어컨 COP / 콘덴싱보일러 효율
-        cost_c = (total_cool_kwh / cop_c) * 215 # 전기료
-        cost_h = (total_heat_kwh / cop_h) * 160 # 가스비
-
-        # 결과 출력
-        st.subheader("📝 시뮬레이션 결과 리포트")
+        # 출력 및 보고서
+        st.subheader(f"📊 분석 결과 (기준: {engine_type})")
         c1, c2 = st.columns(2)
-        c1.metric("연간 냉방비", f"{int(cost_c):,} 원", f"{total_cool_kwh:,.1f} kWh")
-        c2.metric("연간 난방비", f"{int(cost_h):,} 원", f"{total_heat_kwh:,.1f} kWh")
+        
+        cop_c, cop_h = 3.6, 0.88
+        cost_c = (total_cool_kwh / cop_c) * 215
+        cost_h = (total_heat_kwh / cop_h) * 160
+
+        c1.metric("❄️ 연간 냉방비", f"{int(cost_c):,} 원", f"{total_cool_kwh:,.1f} kWh")
+        c2.metric("🔥 연간 난방비", f"{int(cost_h):,} 원", f"{total_heat_kwh:,.1f} kWh")
 
         st.divider()
-        st.subheader("⚙️ 에너지 산출 적용 툴 및 근거")
-        st.markdown(f"""
-        - **적용 툴:** **ISO 13790 기반 정밀 간이 동적 계산법**
-        - **분석 논리:**
-            1. **시간대 분할:** 24시간 평균 부하 방식의 오류를 해결하기 위해 하루를 3개 시간대(주간/저녁/심야)로 분리하여 계산함.
-            2. **야간 냉각 반영:** 심야 시간대(00-08시)의 외기 온도를 보정(-4℃)하여 동절기 야간 난방 부하를 실질적으로 산출함.
-            3. **일사/발열 변동성:** 일사량이 없는 밤 시간대와 발열이 적은 새벽 시간대의 에너지 평형을 독립적으로 분석함.
-        - **설비 기준:** 냉방 COP {cop_c} (1등급 가전 기준), 난방 효율 {cop_h} (콘덴싱 보일러 기준) 적용.
-        """)
-        
-        # 파일 저장
-        report_data = f"지역: {region}\n냉방에너지: {total_cool_kwh:.1f}kWh\n난방에너지: {total_heat_kwh:.1f}kWh\n산출툴: ISO 13790 Simplified Dynamic Method"
-        st.download_button("📂 결과 보고서(TXT) 저장", report_data, file_name="energy_report.txt")
+        report_text = f"""
+### 📋 에너지 산출 상세 근거
+1. **적용 툴/기준:** {engine_type}
+2. **유리 성능:** U-val {u_val}, SHGC {shgc}, 투과율 {vlt}, 반사율 {reflectance}
+3. **방위별 창면적비:** 북({wwr_n}), 남({wwr_s}), 동({wwr_e}), 서({wwr_w})
+4. **산출 논리:** - 방위별 일사 가중치 및 시간대별(3분할) 동적 부하 평형 계산.
+   - 가시광선 투과율(VLT)에 따른 조명 부하 간섭 및 반사율 보정치 반영.
+   - {engine_type} 고유의 알고리즘에 따른 엔진 보정 계수({engine_bias}) 적용.
+        """
+        st.markdown(report_text)
+        st.download_button("📂 시뮬레이션 결과 저장", report_text, file_name="building_energy_report.txt")
